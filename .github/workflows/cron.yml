@@ -1,0 +1,37 @@
+on:
+  workflow_call:
+    inputs:
+      name:
+        required: true
+        type: string
+      env:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+        with:
+          path: cron
+
+      - name: 环境配置
+        uses: ./cron/.github/actions/setup
+        with:
+          gh_pat: ${{ secrets.GH_TOKEN }}
+
+      - name: 执行任务
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_PAT: ${{ secrets.GH_TOKEN }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.env }}
+        run: |
+          set -ex
+          cd cron
+          cd ${{inputs.name}}
+          ./run.sh

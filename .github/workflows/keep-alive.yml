@@ -1,0 +1,33 @@
+name: keep-alive
+
+permissions: write-all
+
+env:
+  TZ: Asia/Shanghai
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 分钟 小时 日期 月份 星期（0-6）//0代表星期天
+    - cron: "1 1 1 * *"
+
+jobs:
+  run-it:
+    runs-on: ubuntu-latest
+    name: keep-alive
+    steps:
+      - uses: actions/checkout@v6
+      - name: ci # 避免 github 代码库3个月没提交停止运行 crontab
+        shell: bash
+        run: |
+          set -ex
+          echo $(date +%m) >.date
+          git config --global user.email action@github.com
+          git config --global user.name ${{ github.repository_owner }}
+          git add .date
+          git commit -m^ || true
+      - name: push
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}

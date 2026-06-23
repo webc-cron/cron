@@ -1,0 +1,58 @@
+name: 环境配置
+description: 检出配置与代码，配置 Bun 环境与 Git/SSH
+inputs:
+  gh_pat:
+    description: 用于检出私有配置的 GH_PAT
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: 检出私有配置
+      uses: actions/checkout@v5
+      with:
+        repository: ${{ github.repository_owner }}/conf
+        token: ${{ inputs.gh_pat }}
+        path: conf
+
+    - name: 检出代码
+      uses: actions/checkout@v5
+      with:
+        path: cron
+
+    - name: 配置 Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: "25"
+
+    - name: 配置 Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+
+    - name: 获取 Bun 缓存目录
+      id: bun-cache
+      shell: bash
+      run: |
+        if [ -d cron ]; then
+          cd cron
+        fi
+        echo "bun_cache=$(bun pm cache)" >> $GITHUB_OUTPUT
+
+    - name: 缓存 Bun 依赖
+      uses: actions/cache@v5
+      with:
+        path: ${{ steps.bun-cache.outputs.bun_cache }}
+        key: ${{ runner.os }}-bun-${{ hashFiles('**/package.json') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-
+
+    - name: 初始化配置
+      shell: bash
+      run: |
+        set -ex
+        sudo bash -c 'echo "StrictHostKeyChecking accept-new" >> /etc/ssh/ssh_config'
+        git config --global user.name github-action
+        git config --global user.email action@github.com
+        if [ -d cron ]; then
+          cd cron && ln -snf ../conf conf
+        fi

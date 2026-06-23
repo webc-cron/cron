@@ -1,0 +1,4 @@
+{
+  "entry": ["main.js", "freesslInit.js", "redirect.tencent.js"],
+  "ignore": [],
+}

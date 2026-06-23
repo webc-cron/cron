@@ -1,0 +1,17 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@3-/hwdns": "^0.1.41",
+    "@3-/redis": "^0.1.17",
+    "@3-/retry": "^0.0.4",
+    "@3-/ssl": "^0.1.4",
+    "@3-/zx": "^0.1.18",
+    "acme-client": "^5.4.0",
+    "tencentcloud-sdk-nodejs-ssl": "^4.1.239",
+    "tencentcloud-sdk-nodejs-teo": "^4.1.242"
+  },
+  "devDependencies": {
+    "knip": "^6.16.1",
+    "yargs": "^18.0.0"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "devDependencies": {
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0"
+  }
+}

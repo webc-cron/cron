@@ -1,0 +1,22 @@
+name: SSL 证书
+
+env:
+  TZ: Asia/Shanghai
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 分钟 小时 日期 月份 星期（0-6）//0代表星期天
+    - cron: "1 0 */3 * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ssl.yml"
+      - ".github/workflows/cron.yml"
+
+jobs:
+  run:
+    uses: ./.github/workflows/cron.yml
+    with:
+      name: ssl
+    secrets: inherit
