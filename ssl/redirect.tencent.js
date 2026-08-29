@@ -12,33 +12,64 @@ const CUSTOM = "custom",
     region: "ap-guangzhou",
   }),
   argv = await yargs(hideBin(process.argv))
-    .command("$0 <domain> <redirect_url>", "在腾讯云 EdgeOne 中配置重定向", (y) => {
+    .command("$0 <domain> [redirect_url]", "在腾讯云 EdgeOne 中配置重定向", (y) => {
       y.positional("domain", {
         type: "string",
         describe: "域名（例如 www.webc.site、*.webc.site 或 webc.site）",
       }).positional("redirect_url", {
         type: "string",
-        describe: "目标 URL（例如 https://webc.site 或 https://math.webc.site）",
+        describe: "目标 URL（www / * 默认重定向到根域名 https://webc.site）",
       });
     })
     .option("code", {
       alias: "c",
       type: "number",
       choices: [301, 302, 307],
-      describe: "重定向状态码 (301 永久重定向 / 302 临时重定向，默认自动识别)",
+      describe: "重定向状态码 (www 默认为 301 永久重定向，* 及其他默认为 302 临时重定向)",
     })
     .help()
     .parse(),
-  { domain, redirect_url, code } = argv,
+  { domain: inputDomain, redirect_url: inputUrl, code } = argv,
   getZone = async (client, domain) => {
     console.log(`正在获取域名 ${domain} 的 ZoneId...`);
     const { Zones = [] } = await client.DescribeZones({ Limit: 100 }),
-      zone = Zones.find((z) => domain === z.ZoneName || domain.endsWith("." + z.ZoneName));
+      zone = Zones.find(
+        (z) =>
+          domain === z.ZoneName ||
+          domain.endsWith("." + z.ZoneName) ||
+          domain === "www" ||
+          domain === "*",
+      );
     if (!zone) {
       throw new Error(`未找到域名匹配 of EdgeOne 站点：${domain}`);
     }
     console.log(`找到 ZoneId: ${zone.ZoneId} (站点名称: ${zone.ZoneName})`);
     return zone;
+  },
+  reorderRules = async (client, zone_id) => {
+    const { Rules = [] } = await client.DescribeL7AccRules({
+      ZoneId: zone_id,
+      Limit: 1000,
+    });
+    if (Rules.length <= 1) return;
+    const sortedRules = [...Rules].sort((a, b) => {
+      const aWild =
+        a.RuleName?.includes("*") || a.Branches?.some((br) => br.Condition?.includes("*"));
+      const bWild =
+        b.RuleName?.includes("*") || b.Branches?.some((br) => br.Condition?.includes("*"));
+      if (aWild && !bWild) return 1;
+      if (!aWild && bWild) return -1;
+      return 0;
+    });
+    const currentIds = Rules.map((r) => r.RuleId).join(",");
+    const sortedIds = sortedRules.map((r) => r.RuleId).join(",");
+    if (currentIds !== sortedIds) {
+      console.log("正在优化规则优先级 (确保具体域名优先于泛域名通配符)...");
+      await client.ModifyL7AccRulePriority({
+        ZoneId: zone_id,
+        RuleIds: sortedRules.map((r) => r.RuleId),
+      });
+    }
   },
   upsertRule = async (client, zone_id, domain, rule_name, rule_item, statusCode) => {
     const redirectType =
@@ -81,15 +112,33 @@ const CUSTOM = "custom",
         Rules: [rule_item],
       });
     }
+    await reorderRules(client, zone_id);
   };
 
-const zone = await getZone(client, domain),
-  url = new URL(redirect_url.includes("://") ? redirect_url : `https://${redirect_url}`),
-  isPermanent =
-    (domain.startsWith("www.") || domain.startsWith("*.")) &&
-    (url.hostname === zone.ZoneName ||
-      url.hostname === domain.replace(/^(\*|www)\./, "") ||
-      url.hostname === `www.${zone.ZoneName}`),
+const zone = await getZone(client, inputDomain),
+  domain =
+    inputDomain === "www"
+      ? `www.${zone.ZoneName}`
+      : inputDomain === "*"
+        ? `*.${zone.ZoneName}`
+        : inputDomain;
+
+let targetUrl = inputUrl;
+if (!targetUrl) {
+  if (domain.startsWith("www.") || domain.startsWith("*.")) {
+    targetUrl = `https://${zone.ZoneName}`;
+  } else {
+    throw new Error(
+      `域名 ${domain} 重定向需要指定目标 URL，例如：./redirect.tencent.js ${domain} https://math.${zone.ZoneName}`,
+    );
+  }
+}
+if (!targetUrl.includes("://")) {
+  targetUrl = `https://${targetUrl}`;
+}
+
+const url = new URL(targetUrl),
+  isPermanent = domain.startsWith("www."),
   statusCode = code || (isPermanent ? 301 : 302),
   action = {
     Name: "AccessURLRedirect",

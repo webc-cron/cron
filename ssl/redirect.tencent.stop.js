@@ -54,7 +54,12 @@ const CLIENT_CLASS = teo.v20220901.Client,
         (r) =>
           isRedirectRule(r) &&
           (r.RuleName === rule_name ||
-            r.Branches?.some((b) => b.Condition?.includes(`['${domain}']`))),
+            (domain === zone.ZoneName && r.RuleName === `redirect-*.${domain}`) ||
+            r.Branches?.some(
+              (b) =>
+                b.Condition?.includes(`['${domain}']`) ||
+                (domain === zone.ZoneName && b.Condition?.includes(`['*.${domain}']`)),
+            )),
       ),
       toDeleteRules = all ? matchedRules : matchedRules.filter(isTemporaryRedirectRule),
       permanentRules = matchedRules.filter((r) => !isTemporaryRedirectRule(r));
