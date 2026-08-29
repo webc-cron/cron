@@ -15,15 +15,21 @@ const CUSTOM = "custom",
     .command("$0 <domain> <redirect_url>", "在腾讯云 EdgeOne 中配置重定向", (y) => {
       y.positional("domain", {
         type: "string",
-        describe: "域名（例如 *.webc.site 或 webc.site）",
+        describe: "域名（例如 www.webc.site、*.webc.site 或 webc.site）",
       }).positional("redirect_url", {
         type: "string",
-        describe: "目标 URL（例如 https://math.webc.site）",
+        describe: "目标 URL（例如 https://webc.site 或 https://math.webc.site）",
       });
+    })
+    .option("code", {
+      alias: "c",
+      type: "number",
+      choices: [301, 302, 307],
+      describe: "重定向状态码 (301 永久重定向 / 302 临时重定向，默认自动识别)",
     })
     .help()
     .parse(),
-  { domain, redirect_url } = argv,
+  { domain, redirect_url, code } = argv,
   getZone = async (client, domain) => {
     console.log(`正在获取域名 ${domain} 的 ZoneId...`);
     const { Zones = [] } = await client.DescribeZones({ Limit: 100 }),
@@ -35,7 +41,12 @@ const CUSTOM = "custom",
     return zone;
   },
   upsertRule = async (client, zone_id, domain, rule_name, rule_item, statusCode) => {
-    const redirectType = statusCode === 301 ? "永久重定向 (301)" : "临时重定向 (302)";
+    const redirectType =
+      statusCode === 301
+        ? "永久重定向 (301)"
+        : statusCode === 307
+          ? "临时重定向 (307)"
+          : "临时重定向 (302)";
     console.log(`正在检查域名 "${domain}" 的规则...`);
     const { Rules = [] } = await client.DescribeL7AccRules({
         ZoneId: zone_id,
@@ -43,7 +54,8 @@ const CUSTOM = "custom",
       }),
       matchedRules = Rules.filter(
         (r) =>
-          r.RuleName === rule_name || r.Branches?.some((b) => b.Condition?.includes(`'${domain}'`)),
+          r.RuleName === rule_name ||
+          r.Branches?.some((b) => b.Condition?.includes(`['${domain}']`)),
       );
 
     if (matchedRules.length > 0) {
@@ -72,14 +84,13 @@ const CUSTOM = "custom",
   };
 
 const zone = await getZone(client, domain),
-  url = new URL(redirect_url),
+  url = new URL(redirect_url.includes("://") ? redirect_url : `https://${redirect_url}`),
   isPermanent =
-    domain.startsWith("*") &&
+    (domain.startsWith("www.") || domain.startsWith("*.")) &&
     (url.hostname === zone.ZoneName ||
-      url.hostname === `www.${zone.ZoneName}` ||
-      url.hostname === "webc.site" ||
-      url.hostname === "www.webc.site"),
-  statusCode = isPermanent ? 301 : 302,
+      url.hostname === domain.replace(/^(\*|www)\./, "") ||
+      url.hostname === `www.${zone.ZoneName}`),
+  statusCode = code || (isPermanent ? 301 : 302),
   action = {
     Name: "AccessURLRedirect",
     AccessURLRedirectParameters: {
