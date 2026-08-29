@@ -34,7 +34,8 @@ const CUSTOM = "custom",
     console.log(`找到 ZoneId: ${zone.ZoneId} (站点名称: ${zone.ZoneName})`);
     return zone;
   },
-  upsertRule = async (client, zone_id, domain, rule_name, rule_item) => {
+  upsertRule = async (client, zone_id, domain, rule_name, rule_item, statusCode) => {
+    const redirectType = statusCode === 301 ? "永久重定向 (301)" : "临时重定向 (302)";
     console.log(`正在检查域名 "${domain}" 的规则...`);
     const { Rules = [] } = await client.DescribeL7AccRules({
         ZoneId: zone_id,
@@ -47,7 +48,7 @@ const CUSTOM = "custom",
 
     if (matchedRules.length > 0) {
       const [primaryRule, ...extraRules] = matchedRules;
-      console.log(`找到已存在规则 (ID: ${primaryRule.RuleId})，正在更新为临时重定向 (302)...`);
+      console.log(`找到已存在规则 (ID: ${primaryRule.RuleId})，正在更新为${redirectType}...`);
       await client.ModifyL7AccRule({
         ZoneId: zone_id,
         Rule: { RuleId: primaryRule.RuleId, ...rule_item },
@@ -62,7 +63,7 @@ const CUSTOM = "custom",
         });
       }
     } else {
-      console.log("规则不存在，正在创建临时重定向 (302) 规则...");
+      console.log(`规则不存在，正在创建${redirectType}规则...`);
       await client.CreateL7AccRules({
         ZoneId: zone_id,
         Rules: [rule_item],
@@ -72,10 +73,17 @@ const CUSTOM = "custom",
 
 const zone = await getZone(client, domain),
   url = new URL(redirect_url),
+  isPermanent =
+    domain.startsWith("*") &&
+    (url.hostname === zone.ZoneName ||
+      url.hostname === `www.${zone.ZoneName}` ||
+      url.hostname === "webc.site" ||
+      url.hostname === "www.webc.site"),
+  statusCode = isPermanent ? 301 : 302,
   action = {
     Name: "AccessURLRedirect",
     AccessURLRedirectParameters: {
-      StatusCode: 302,
+      StatusCode: statusCode,
       Protocol: url.protocol.slice(0, -1),
       HostName: { Action: CUSTOM, Value: url.hostname },
       URLPath:
@@ -97,5 +105,5 @@ const zone = await getZone(client, domain),
     ],
   };
 
-await upsertRule(client, zone.ZoneId, domain, rule_name, rule_item);
+await upsertRule(client, zone.ZoneId, domain, rule_name, rule_item, statusCode);
 console.log("规则配置成功！");
