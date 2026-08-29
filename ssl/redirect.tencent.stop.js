@@ -30,25 +30,32 @@ const CLIENT_CLASS = teo.v20220901.Client,
     console.log(`找到 ZoneId: ${zone.ZoneId} (站点名称: ${zone.ZoneName})`);
     return zone;
   },
-  deleteRule = async (client, zone_id, rule_name) => {
-    console.log(`正在检查规则 "${rule_name}" 是否存在...`);
-    const { Rules = [] } = await client.DescribeL7AccRules({ ZoneId: zone_id }),
-      rule = Rules.find((r) => r.RuleName === rule_name);
+  deleteRule = async (client, zone_id, domain, rule_name) => {
+    console.log(`正在检查域名 "${domain}" 的规则...`);
+    const { Rules = [] } = await client.DescribeL7AccRules({
+        ZoneId: zone_id,
+        Limit: 1000,
+      }),
+      matchedRules = Rules.filter(
+        (r) =>
+          r.RuleName === rule_name || r.Branches?.some((b) => b.Condition?.includes(`'${domain}'`)),
+      );
 
-    if (rule) {
-      console.log(`找到规则 (ID: ${rule.RuleId})。正在删除...`);
+    if (matchedRules.length > 0) {
+      const ruleIds = matchedRules.map((r) => r.RuleId);
+      console.log(`找到 ${ruleIds.length} 条匹配规则 (IDs: ${ruleIds.join(", ")}）。正在删除...`);
       await client.DeleteL7AccRules({
         ZoneId: zone_id,
-        RuleIds: [rule.RuleId],
+        RuleIds: ruleIds,
       });
-      console.log(`规则 "${rule_name}" 已成功删除。`);
+      console.log(`规则已成功删除。`);
     } else {
-      console.log(`规则 "${rule_name}" 不存在，无需删除。`);
+      console.log(`未找到域名 "${domain}" 的重定向规则，无需删除。`);
     }
   };
 
 const zone = await getZone(client, domain),
   rule_name = `redirect-${domain}`;
 
-await deleteRule(client, zone.ZoneId, rule_name);
+await deleteRule(client, zone.ZoneId, domain, rule_name);
 console.log("操作完成！");

@@ -10,7 +10,13 @@ const OPT = {
   teo_client = new teo.v20220901.Client(OPT);
 
 export default async (updates) => {
-  for (const [domain, { key_crt: [key, crt], host_conf }] of updates) {
+  for (const [
+    domain,
+    {
+      key_crt: [key, crt],
+      host_conf,
+    },
+  ] of updates) {
     if (!host_conf) continue;
 
     const { Zones = [] } = await teo_client.DescribeZones({ Limit: 100 }),
@@ -42,6 +48,8 @@ export default async (updates) => {
       ServerCertInfo: [{ CertId: CertificateId }],
     });
 
-    console.log(`Updated ${domain} in EdgeOne (CertId: ${CertificateId}, Hosts: ${hosts.join(", ")})`);
+    console.log(
+      `Updated ${domain} in EdgeOne (CertId: ${CertificateId}, Hosts: ${hosts.join(", ")})`,
+    );
   }
 };

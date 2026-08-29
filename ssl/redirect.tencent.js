@@ -34,19 +34,35 @@ const CUSTOM = "custom",
     console.log(`找到 ZoneId: ${zone.ZoneId} (站点名称: ${zone.ZoneName})`);
     return zone;
   },
-  upsertRule = async (client, zone_id, rule_name, rule_item) => {
-    console.log(`正在检查规则 "${rule_name}" 是否存在...`);
-    const { Rules = [] } = await client.DescribeL7AccRules({ ZoneId: zone_id }),
-      rule = Rules.find((r) => r.RuleName === rule_name);
+  upsertRule = async (client, zone_id, domain, rule_name, rule_item) => {
+    console.log(`正在检查域名 "${domain}" 的规则...`);
+    const { Rules = [] } = await client.DescribeL7AccRules({
+        ZoneId: zone_id,
+        Limit: 1000,
+      }),
+      matchedRules = Rules.filter(
+        (r) =>
+          r.RuleName === rule_name || r.Branches?.some((b) => b.Condition?.includes(`'${domain}'`)),
+      );
 
-    if (rule) {
-      console.log(`规则已存在。正在更新规则 (ID: ${rule.RuleId})...`);
+    if (matchedRules.length > 0) {
+      const [primaryRule, ...extraRules] = matchedRules;
+      console.log(`找到已存在规则 (ID: ${primaryRule.RuleId})，正在更新为临时重定向 (302)...`);
       await client.ModifyL7AccRule({
         ZoneId: zone_id,
-        Rule: { RuleId: rule.RuleId, ...rule_item },
+        Rule: { RuleId: primaryRule.RuleId, ...rule_item },
       });
+
+      if (extraRules.length > 0) {
+        const extraIds = extraRules.map((r) => r.RuleId);
+        console.log(`清理重复/历史老规则 (IDs: ${extraIds.join(", ")})...`);
+        await client.DeleteL7AccRules({
+          ZoneId: zone_id,
+          RuleIds: extraIds,
+        });
+      }
     } else {
-      console.log("规则不存在。正在创建规则...");
+      console.log("规则不存在，正在创建临时重定向 (302) 规则...");
       await client.CreateL7AccRules({
         ZoneId: zone_id,
         Rules: [rule_item],
@@ -81,5 +97,5 @@ const zone = await getZone(client, domain),
     ],
   };
 
-await upsertRule(client, zone.ZoneId, rule_name, rule_item);
+await upsertRule(client, zone.ZoneId, domain, rule_name, rule_item);
 console.log("规则配置成功！");
