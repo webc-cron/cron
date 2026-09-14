@@ -44,6 +44,45 @@ const CLIENT_CLASS = teo.v20220901.Client,
         (a) => a.Name === "AccessURLRedirect" && a.AccessURLRedirectParameters?.StatusCode !== 301,
       ),
     ),
+  reorderRules = async (client, zone_id) => {
+    const { Rules = [] } = await client.DescribeL7AccRules({
+      ZoneId: zone_id,
+      Limit: 1000,
+    });
+    if (Rules.length <= 1) return;
+    const sortedRules = [...Rules].sort((a, b) => {
+      const aWild =
+        a.RuleName?.includes("*") || a.Branches?.some((br) => br.Condition?.includes("*"));
+      const bWild =
+        b.RuleName?.includes("*") || b.Branches?.some((br) => br.Condition?.includes("*"));
+      if (aWild && !bWild) return 1;
+      if (!aWild && bWild) return -1;
+      return 0;
+    });
+    const currentIds = Rules.map((r) => r.RuleId).join(",");
+    const sortedIds = sortedRules.map((r) => r.RuleId).join(",");
+    if (currentIds !== sortedIds) {
+      console.log("正在优化规则优先级 (确保具体域名优先于泛域名通配符)...");
+      await client.ModifyL7AccRulePriority({
+        ZoneId: zone_id,
+        RuleIds: sortedRules.map((r) => r.RuleId),
+      });
+    }
+  },
+  purgeCache = async (client, zone_id, domain) => {
+    try {
+      const cleanDomain = domain.replace(/^\*\./, "");
+      const targets = [`http://${cleanDomain}/`, `https://${cleanDomain}/`];
+      const { JobId } = await client.CreatePurgeTask({
+        ZoneId: zone_id,
+        Type: "purge_url",
+        Targets: targets,
+      });
+      console.log(`自动清理：已提交 ${cleanDomain} 的边缘缓存清理任务 (JobId: ${JobId})。`);
+    } catch (e) {
+      console.log(`缓存清理提示: ${e.message}`);
+    }
+  },
   deleteRule = async (client, zone_id, domain, rule_name, all = false) => {
     console.log(`正在检查域名 "${domain}" 的重定向规则...`);
     const { Rules = [] } = await client.DescribeL7AccRules({
@@ -82,6 +121,8 @@ const CLIENT_CLASS = teo.v20220901.Client,
         RuleIds: ruleIds,
       });
       console.log(`临时重定向规则已成功删除。`);
+      await reorderRules(client, zone_id);
+      await purgeCache(client, zone_id, domain);
     } else {
       console.log(`未找到域名 "${domain}" 的临时重定向规则，无需删除。`);
     }

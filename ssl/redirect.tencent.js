@@ -71,6 +71,63 @@ const CUSTOM = "custom",
       });
     }
   },
+  ensureAccelerationDomain = async (client, zone_id, domain) => {
+    if (domain.startsWith("*")) return;
+    const { AccelerationDomains = [] } = await client.DescribeAccelerationDomains({
+      ZoneId: zone_id,
+    });
+    const exists = AccelerationDomains.find((d) => d.DomainName === domain);
+    if (exists) return;
+
+    console.log(`自动检测到 ${domain} 尚未配置加速域名，正在自动创建并修复...`);
+    const template =
+      AccelerationDomains.find((d) => d.DomainName.startsWith("*")) || AccelerationDomains[0];
+
+    if (!template) return;
+
+    const originInfo = {
+      OriginType: template.OriginDetail?.OriginType || "COS",
+      Origin: template.OriginDetail?.Origin || "",
+      PrivateAccess: template.OriginDetail?.PrivateAccess || "off",
+    };
+
+    await client.CreateAccelerationDomain({
+      ZoneId: zone_id,
+      DomainName: domain,
+      OriginInfo: originInfo,
+      OriginProtocol: template.OriginProtocol || "FOLLOW",
+      HttpOriginPort: template.HttpOriginPort || 80,
+      HttpsOriginPort: template.HttpsOriginPort || 443,
+      IPv6Status: template.IPv6Status || "on",
+    });
+
+    const certId = template.Certificate?.List?.[0]?.CertId;
+    if (certId) {
+      await client.ModifyHostsCertificate({
+        ZoneId: zone_id,
+        Hosts: [domain],
+        Mode: "sslcert",
+        ServerCertInfo: [{ CertId: certId }],
+      });
+      console.log(`自动修复：已为 ${domain} 创建加速域名并绑定证书 (CertId: ${certId})。`);
+    } else {
+      console.log(`自动修复：已为 ${domain} 创建加速域名。`);
+    }
+  },
+  purgeCache = async (client, zone_id, domain) => {
+    try {
+      const cleanDomain = domain.replace(/^\*\./, "");
+      const targets = [`http://${cleanDomain}/`, `https://${cleanDomain}/`];
+      const { JobId } = await client.CreatePurgeTask({
+        ZoneId: zone_id,
+        Type: "purge_url",
+        Targets: targets,
+      });
+      console.log(`自动清理：已提交 ${cleanDomain} 的边缘缓存清理任务 (JobId: ${JobId})。`);
+    } catch (e) {
+      console.log(`缓存清理提示: ${e.message}`);
+    }
+  },
   upsertRule = async (client, zone_id, domain, rule_name, rule_item, statusCode) => {
     const redirectType =
       statusCode === 301
@@ -112,7 +169,9 @@ const CUSTOM = "custom",
         Rules: [rule_item],
       });
     }
+    await ensureAccelerationDomain(client, zone_id, domain);
     await reorderRules(client, zone_id);
+    await purgeCache(client, zone_id, domain);
   };
 
 const zone = await getZone(client, inputDomain),
